@@ -25,7 +25,7 @@ options:
   --jobs <n>         ffmpeg processes at once (default 4)
   --sheet <mode>     contact sheet per pass: mobile (default) tiles each frame's
                      9:16 crop centred on its colour; desktop tiles whole frames
-                     with the fixed crop outlined; none writes no sheet
+                     with each colour centre marked; none writes no sheet
   --no-hw            decode and scale on the CPU instead of VideoToolbox
   --plan             print the runs each pass would make, decode nothing`;
 

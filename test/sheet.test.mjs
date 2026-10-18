@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  layout, createSheet, place, outline, origin, windowIn, cut, BACKDROP, WINDOW, MAX_PIXELS,
+  layout, createSheet, place, mark, origin, windowIn, cut, BACKDROP, CENTRE, MAX_PIXELS,
 } from '../src/sheet.mjs';
 
 const px = (sheet, x, y) => [...sheet.rgb.subarray((y * sheet.W + x) * 3, (y * sheet.W + x) * 3 + 3)];
@@ -27,13 +27,13 @@ test('a frame lands in its time slot whatever order it arrives in', () => {
   assert.deepEqual(px(sheet, origin(sheet, 0).ox, origin(sheet, 0).oy), [BACKDROP, BACKDROP, BACKDROP]);
 });
 
-test('a window hanging off the frame is clipped to its own tile', () => {
+test('a mark at the frame edge is clipped to its own tile', () => {
   const sheet = createSheet([0, 1], 10, 10);
-  outline(sheet, 0, { x0: 0.5, y0: 0.2, x1: 1.5, y1: 0.8 });
+  mark(sheet, 0, { x: 1, y: 0.5 });
   const a = origin(sheet, 0);
   const b = origin(sheet, 1);
-  assert.deepEqual(px(sheet, a.ox + 5, a.oy + 2), WINDOW);
-  assert.deepEqual(px(sheet, b.ox, b.oy + 2), [BACKDROP, BACKDROP, BACKDROP]);
+  assert.deepEqual(px(sheet, a.ox + 9, a.oy + 5), CENTRE);
+  assert.deepEqual(px(sheet, b.ox, b.oy + 5), [BACKDROP, BACKDROP, BACKDROP]);
 });
 
 test('the mobile window scales into each pass', () => {

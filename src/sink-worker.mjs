@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { analyseFrame, aggregate, suggestCrop } from './analyse.mjs';
-import { createSheet, place, outline, mark, windowIn, cut } from './sheet.mjs';
+import { createSheet, place, mark, windowIn, cut } from './sheet.mjs';
 
 // Frames arrive here off the decode thread. Today they become PNGs plus a
 // manifest; another sink only has to answer the same three messages. Each
@@ -50,21 +50,12 @@ function flush() {
 }
 
 // Mobile: each tile already is its frame's crop, so there is nothing to draw.
-// Desktop: the suggested window is the same on every tile and the colour centre
-// is each frame's own, so a centre outside the window is a frame the crop loses.
-function writeSheet(name, crop) {
+// Desktop: whole frames with only each frame's colour centre marked.
+function writeSheet(name) {
   const sheet = sheets[name];
   if (!sheet) return null;
   for (const f of sheetMode === 'desktop' ? manifest.passes[name].frames : []) {
-    const i = sheet.slot.get(f.frame);
-    if (crop) {
-      const { w, h } = win;
-      outline(sheet, i, {
-        x0: (crop.cx - w / 2) / frameSize.width, x1: (crop.cx + w / 2) / frameSize.width,
-        y0: (crop.cy - h / 2) / frameSize.height, y1: (crop.cy + h / 2) / frameSize.height,
-      });
-    }
-    if (f.centre) mark(sheet, i, f.centre);
+    if (f.centre) mark(sheet, sheet.slot.get(f.frame), f.centre);
   }
   const file = `sheet-${name}.png`;
   fs.writeFileSync(path.join(out, file), png(sheet.W, sheet.H, sheet.rgb));
@@ -100,7 +91,7 @@ parentPort.on('message', (msg) => {
     });
   } else if (msg.type === 'pass-end') {
     const crop = suggestCrop(aggregate(seen[msg.pass]), frameSize, workerData.window);
-    const sheet = writeSheet(msg.pass, crop);
+    const sheet = writeSheet(msg.pass);
     Object.assign(manifest.passes[msg.pass], msg.stats, { crop, sheet });
     flush();
     parentPort.postMessage({ type: 'flushed', pass: msg.pass, crop, sheet });

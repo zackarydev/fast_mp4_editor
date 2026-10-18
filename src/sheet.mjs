@@ -1,10 +1,9 @@
-// A pass as one picture: every frame it decoded, tiled in time order, with the
-// crop it suggests drawn over each tile. Tiles land as frames arrive, in any
-// order, so the sheet is complete the moment the last frame is.
+// A pass as one picture: every frame it decoded, tiled in time order. Tiles
+// land as frames arrive, in any order, so the sheet is complete the moment the
+// last frame is.
 
 export const PAD = 0;
 export const BACKDROP = 0;
-export const WINDOW = [255, 214, 10];
 export const CENTRE = [255, 0, 200];
 // Past this the sheet stops being something to look at and starts being a memory problem.
 export const MAX_PIXELS = 64 * 1024 * 1024;
@@ -61,26 +60,11 @@ export function cut(rgb, w, h, cx, cy, cw, ch) {
   return tile;
 }
 
-// Drawing is clipped to the tile, so a window hanging off the frame edge never bleeds into a neighbour.
+// Drawing is clipped to the tile, so a mark at the frame edge never bleeds into a neighbour.
 function plot(sheet, i, x, y, colour) {
   if (x < 0 || y < 0 || x >= sheet.w || y >= sheet.h) return;
   const { ox, oy } = origin(sheet, i);
   sheet.rgb.set(colour, ((oy + y) * sheet.W + ox + x) * 3);
-}
-
-export function outline(sheet, i, box, colour = WINDOW) {
-  const x0 = Math.round(box.x0 * sheet.w);
-  const x1 = Math.round(box.x1 * sheet.w) - 1;
-  const y0 = Math.round(box.y0 * sheet.h);
-  const y1 = Math.round(box.y1 * sheet.h) - 1;
-  for (let x = x0; x <= x1; x++) {
-    plot(sheet, i, x, y0, colour);
-    plot(sheet, i, x, y1, colour);
-  }
-  for (let y = y0; y <= y1; y++) {
-    plot(sheet, i, x0, y, colour);
-    plot(sheet, i, x1, y, colour);
-  }
 }
 
 export function mark(sheet, i, point, colour = CENTRE) {
