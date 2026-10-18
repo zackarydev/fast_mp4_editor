@@ -1,0 +1,21 @@
+{
+  "name": "mp4-fast-editor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "mp4cut": "./bin/mp4cut.mjs"
+  },
+  "engines": {
+    "node": ">=22.2"
+  },
+  "scripts": {
+    "test": "node --test",
+    "probe": "node bin/mp4cut.mjs probe test/test.mp4",
+    "frames": "node bin/mp4cut.mjs frames",
+    "plan": "node bin/mp4cut.mjs frames --plan",
+    "demo": "node bin/mp4cut.mjs frames test/test.mp4 --count 30 && open out/test/sheet-medium.png",
+    "demo:desktop": "node bin/mp4cut.mjs frames test/test.mp4 --count 30 --sheet desktop && open out/test/sheet-medium.png",
+    "clean": "rm -rf out"
+  }
+}
