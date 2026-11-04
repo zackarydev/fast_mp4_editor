@@ -27,7 +27,8 @@ function hwDownloadFormat(pixFmt) {
 
 // Hardware: VideoToolbox decodes, select drops unwanted frames while they are
 // still on the GPU, scale_vt shrinks there too, and only the small frame crosses
-// to the CPU. Software: the same graph with the CPU doing every step.
+// to the CPU. Software: the same graph with the CPU doing every step. A
+// keyframes-only run has the decoder skip the rest before they cost anything.
 export function ffmpegArgs(index, run, { w, h }, hw) {
   const seekTo = index.pts[run.key] + window(index, run.key);
   const select = `select='${selectExpr(index, run.frames)}'`;
@@ -39,6 +40,7 @@ export function ffmpegArgs(index, run, { w, h }, hw) {
     ...(hw ? ['-hwaccel', 'videotoolbox', '-hwaccel_output_format', 'videotoolbox_vld'] : []),
     '-noautorotate',
     '-noaccurate_seek', '-ss', seekTo.toFixed(9), '-copyts',
+    ...(run.keysOnly ? ['-skip_frame', 'nokey'] : []),
     '-i', index.file,
     '-map', '0:v:0', '-an', '-sn', '-dn',
     '-vf', graph,

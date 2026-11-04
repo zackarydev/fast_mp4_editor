@@ -11,11 +11,10 @@
   },
   "scripts": {
     "test": "node --test",
-    "probe": "node bin/mp4cut.mjs probe test/test.mp4",
+    "probe": "node bin/mp4cut.mjs probe",
     "frames": "node bin/mp4cut.mjs frames",
     "plan": "node bin/mp4cut.mjs frames --plan",
-    "demo": "node bin/mp4cut.mjs frames test/test.mp4 --count 30 && open out/test/sheet-medium.png",
-    "demo:desktop": "node bin/mp4cut.mjs frames test/test.mp4 --count 30 --sheet desktop && open out/test/sheet-medium.png",
-    "clean": "rm -rf out"
+    "demo": "node bin/mp4cut.mjs frames test/lever.mp4 --count 30 && open out/lever/sheet-medium.png",
+    "demo:desktop": "node bin/mp4cut.mjs frames test/lever.mp4 --count 30 --sheet desktop && open out/lever/sheet-medium.png"
   }
 }

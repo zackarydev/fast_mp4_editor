@@ -1,99 +1,120 @@
 import { parentPort, workerData } from 'node:worker_threads';
 import fs from 'node:fs';
 import path from 'node:path';
-import zlib from 'node:zlib';
 import { analyseFrame, aggregate, suggestCrop } from './analyse.mjs';
 import { createSheet, place, mark, windowIn, cut } from './sheet.mjs';
+import { gridOf, blackspace, lost } from './window.mjs';
+import { solve, windowAt } from './track.mjs';
+import { png } from './png.mjs';
 
 // Frames arrive here off the decode thread. Today they become PNGs plus a
 // manifest; another sink only has to answer the same three messages. Each
-// frame is also read for where its content and colour sit, which costs
-// microseconds at these sizes, so the pass doubles as a crop finder.
+// frame is also read for where its content sits, which costs microseconds at
+// these sizes, so the pass doubles as a crop finder: at its end the window's
+// track is solved over every frame it saw.
 
-function chunk(type, data) {
-  const len = Buffer.alloc(4);
-  len.writeUInt32BE(data.length);
-  const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
-  const crc = Buffer.alloc(4);
-  crc.writeUInt32BE(zlib.crc32(body));
-  return Buffer.concat([len, body, crc]);
-}
-
-function png(w, h, rgb) {
-  const stride = w * 3;
-  const raw = Buffer.alloc((stride + 1) * h);
-  for (let y = 0; y < h; y++) {
-    raw[y * (stride + 1)] = 0;
-    raw.set(rgb.subarray(y * stride, (y + 1) * stride), y * (stride + 1) + 1);
-  }
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(w, 0);
-  ihdr.writeUInt32BE(h, 4);
-  ihdr[8] = 8;
-  ihdr[9] = 2;
-  return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    chunk('IHDR', ihdr),
-    chunk('IDAT', zlib.deflateSync(raw, { level: 1 })),
-    chunk('IEND', Buffer.alloc(0)),
-  ]);
-}
-
-const { out, source, frameSize, window: win, sheetMode } = workerData;
+const { out, source, frameSize, window: win, sheetMode, track: trackOptions } = workerData;
 const manifest = { source, passes: {} };
 const seen = {};
+const grids = {};
 const sheets = {};
+const tiles = {};
+// Mobile tiles are cut from the window, which is only known once the pass is,
+// so the pixels wait here till then.
+const held = {};
 
 function flush() {
   for (const p of Object.values(manifest.passes)) p.frames.sort((a, b) => a.frame - b.frame);
   fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify(manifest, null, 2));
 }
 
-// Mobile: each tile already is its frame's crop, so there is nothing to draw.
+const round = (v, k) => Math.round(v * k) / k;
+const rounded = (w) => ({ cx: round(w.cx, 10), cy: round(w.cy, 10), rot: round(w.rot, 100), scale: round(w.scale, 1e4) });
+const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+const range = (xs) => (xs.length ? [Math.min(...xs), Math.max(...xs)] : null);
+
+// Mobile: each tile is its frame's window as the phone shows it, so there is nothing to draw.
 // Desktop: whole frames with only each frame's colour centre marked.
-function writeSheet(name) {
-  const sheet = sheets[name];
+function writeSheet(pass) {
+  const sheet = sheets[pass];
   if (!sheet) return null;
-  for (const f of sheetMode === 'desktop' ? manifest.passes[name].frames : []) {
+  for (const f of sheetMode === 'desktop' ? manifest.passes[pass].frames : []) {
     if (f.centre) mark(sheet, sheet.slot.get(f.frame), f.centre);
   }
-  const file = `sheet-${name}.png`;
+  const file = `sheet-${pass}.png`;
   fs.writeFileSync(path.join(out, file), png(sheet.W, sheet.H, sheet.rgb));
   return file;
 }
 
-parentPort.on('message', (msg) => {
+function handle(msg) {
   if (msg.type === 'pass') {
     fs.mkdirSync(path.join(out, msg.pass.name), { recursive: true });
     manifest.passes[msg.pass.name] = { ...msg.pass, frames: [] };
     seen[msg.pass.name] = [];
+    grids[msg.pass.name] = new Map();
+    held[msg.pass.name] = new Map();
     const tile = sheetMode === 'mobile' ? windowIn(msg.pass.w, msg.pass.h, frameSize, win) : msg.pass;
+    tiles[msg.pass.name] = { w: tile.w, h: tile.h };
     sheets[msg.pass.name] = sheetMode === 'none' ? null : createSheet(msg.frames, tile.w, tile.h);
   } else if (msg.type === 'frame') {
     const file = path.join(msg.pass, `f${String(msg.frame).padStart(7, '0')}.png`);
     fs.writeFileSync(path.join(out, file), png(msg.w, msg.h, msg.data));
     const a = analyseFrame(msg.data, msg.w, msg.h);
     seen[msg.pass].push(a);
-    // This frame's own mobile crop: its colour centre, kept inside its content and the frame.
-    const own = suggestCrop({ box: a.box, centre: a.centre }, frameSize, win)
-      || { cx: frameSize.width / 2, cy: frameSize.height / 2 };
-    const sheet = sheets[msg.pass];
-    if (sheet && sheetMode === 'mobile') {
-      const cx = (own.cx * msg.w) / frameSize.width;
-      const cy = (own.cy * msg.h) / frameSize.height;
-      place(sheet, msg.frame, cut(msg.data, msg.w, msg.h, cx, cy, sheet.w, sheet.h));
-    } else if (sheet) {
-      place(sheet, msg.frame, msg.data);
-    }
+    grids[msg.pass].set(msg.frame, gridOf(msg.data, msg.w, msg.h, frameSize));
+    if (sheetMode === 'mobile') held[msg.pass].set(msg.frame, msg);
+    else if (sheets[msg.pass]) place(sheets[msg.pass], msg.frame, msg.data);
     manifest.passes[msg.pass].frames.push({
-      frame: msg.frame, pts: msg.pts, requested: msg.requested, file, box: a.box, centre: a.centre,
-      mobile: { cx: own.cx, cy: own.cy },
+      frame: msg.frame, pts: msg.pts, requested: msg.requested, file,
+      box: a.box, centre: a.centre,
     });
   } else if (msg.type === 'pass-end') {
-    const crop = suggestCrop(aggregate(seen[msg.pass]), frameSize, workerData.window);
+    const pass = manifest.passes[msg.pass];
+    const agg = aggregate(seen[msg.pass]);
+    // The fixed upright 1080x1920 crop a pass suggested before there was a
+    // track: what the window is measured against.
+    const crop = suggestCrop(agg, frameSize, win);
+    const bounds = agg.box
+      ? { x0: agg.box.x0 * frameSize.width, y0: agg.box.y0 * frameSize.height,
+        x1: agg.box.x1 * frameSize.width, y1: agg.box.y1 * frameSize.height }
+      : { x0: 0, y0: 0, x1: frameSize.width, y1: frameSize.height };
+    const samples = [...grids[msg.pass]].map(([frame, grid]) => ({ frame, grid }));
+    const track = solve(samples, bounds, { ...trackOptions, out: win });
+    const fixed = { blackspace: [], lost: [] };
+    for (const f of pass.frames) {
+      const grid = grids[msg.pass].get(f.frame);
+      const w = windowAt(track, f.frame);
+      Object.assign(f, {
+        window: rounded(w), blackspace: round(blackspace(w, grid, win), 1e3), lost: round(lost(w, grid, win), 1e3),
+      });
+      if (crop) {
+        const upright = { cx: crop.cx, cy: crop.cy, rot: 0, scale: 1 };
+        fixed.blackspace.push(blackspace(upright, grid, win));
+        fixed.lost.push(lost(upright, grid, win));
+      }
+      const px = held[msg.pass].get(f.frame);
+      if (!px) continue;
+      const t = tiles[msg.pass];
+      const tile = cut(px.data, px.w, px.h, frameSize, w, t.w, t.h);
+      if (sheets[msg.pass]) place(sheets[msg.pass], f.frame, tile);
+    }
+    held[msg.pass].clear();
+    const windows = pass.frames.map((f) => f.window);
+    const summary = {
+      mode: track.mode,
+      rot: range(windows.map((w) => w.rot)),
+      scale: range(windows.map((w) => w.scale)),
+      blackspace: round(mean(pass.frames.map((f) => f.blackspace)), 1e3),
+      lost: round(mean(pass.frames.map((f) => f.lost)), 1e3),
+      fixed: crop ? { blackspace: round(mean(fixed.blackspace), 1e3), lost: round(mean(fixed.lost), 1e3) } : null,
+    };
     const sheet = writeSheet(msg.pass);
-    Object.assign(manifest.passes[msg.pass], msg.stats, { crop, sheet });
+    Object.assign(pass, msg.stats, { crop, track, windows: summary, sheet });
+    // The finest pass is the last, and its track is the one an export reads.
+    manifest.track = track;
     flush();
-    parentPort.postMessage({ type: 'flushed', pass: msg.pass, crop, sheet });
+    parentPort.postMessage({ type: 'flushed', pass: msg.pass, crop, windows: summary, sheet });
   }
-});
+}
+
+parentPort.on('message', handle);

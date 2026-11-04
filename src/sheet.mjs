@@ -1,3 +1,5 @@
+import { mapper, OUT } from './window.mjs';
+
 // A pass as one picture: every frame it decoded, tiled in time order. Tiles
 // land as frames arrive, in any order, so the sheet is complete the moment the
 // last frame is.
@@ -47,15 +49,31 @@ export function windowIn(passW, passH, source, win) {
   };
 }
 
-// Cut a cw x ch window centred at (cx, cy) out of a w x h frame, pulled back
-// inside the frame so a centre near the edge never reads past it.
-export function cut(rgb, w, h, cx, cy, cw, ch) {
-  const x0 = Math.min(Math.max(Math.round(cx - cw / 2), 0), w - cw);
-  const y0 = Math.min(Math.max(Math.round(cy - ch / 2), 0), h - ch);
-  const tile = new Uint8Array(cw * ch * 3);
-  for (let y = 0; y < ch; y++) {
-    const from = ((y0 + y) * w + x0) * 3;
-    tile.set(rgb.subarray(from, from + cw * 3), y * cw * 3);
+// The window as the phone will show it, resampled from a w x h pass of the
+// source into a tw x th tile: bilinear inside the source, black past its edge,
+// so a tile's blackspace is the export's.
+export function cut(rgb, w, h, frame, win, tw, th) {
+  const at = mapper(win);
+  const tile = new Uint8Array(tw * th * 3);
+  const p = [0, 0];
+  for (let j = 0; j < th; j++) {
+    for (let i = 0; i < tw; i++) {
+      at(((i + 0.5) * OUT.w) / tw, ((j + 0.5) * OUT.h) / th, p);
+      if (p[0] < 0 || p[1] < 0 || p[0] >= frame.width || p[1] >= frame.height) continue;
+      const x = Math.min(Math.max((p[0] * w) / frame.width - 0.5, 0), w - 1);
+      const y = Math.min(Math.max((p[1] * h) / frame.height - 0.5, 0), h - 1);
+      const x0 = Math.floor(x);
+      const y0 = Math.floor(y);
+      const x1 = Math.min(x0 + 1, w - 1);
+      const y1 = Math.min(y0 + 1, h - 1);
+      const fx = x - x0;
+      const fy = y - y0;
+      for (let c = 0; c < 3; c++) {
+        const top = rgb[(y0 * w + x0) * 3 + c] * (1 - fx) + rgb[(y0 * w + x1) * 3 + c] * fx;
+        const bottom = rgb[(y1 * w + x0) * 3 + c] * (1 - fx) + rgb[(y1 * w + x1) * 3 + c] * fx;
+        tile[(j * tw + i) * 3 + c] = Math.round(top * (1 - fy) + bottom * fy);
+      }
+    }
   }
   return tile;
 }

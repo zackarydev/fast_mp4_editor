@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { sequence, evenly, random, resolve, plan } from '../src/plan.mjs';
+import { sequence, evenly, random, resolve, plan, sweep } from '../src/plan.mjs';
 
 // A 60fps clip of `count` frames with a keyframe every `gop`.
 function fakeIndex(count, gop) {
@@ -50,4 +50,15 @@ test('frames closer than a keyframe gap share one forward run', () => {
 test('a frame just past a keyframe starts fresh rather than decoding on through a gap', () => {
   const runs = plan(fakeIndex(20000, 600), [100, 1201]);
   assert.deepEqual(runs.map((r) => r.key), [0, 1200]);
+});
+
+test('a key pass sweeps its keyframes in one contiguous run per job, counting every keyframe passed', () => {
+  const runs = sweep(fakeIndex(20000, 600), [6000, 0, 600, 1800, 3000], 2);
+  assert.deepEqual(runs.map((r) => r.frames), [[0, 600], [1800, 3000, 6000]]);
+  assert.deepEqual(runs.map((r) => r.decodes), [2, 8]);
+  assert.ok(runs.every((r) => r.keysOnly));
+});
+
+test('fewer keyframes than jobs sweep one each', () => {
+  assert.deepEqual(sweep(fakeIndex(20000, 600), [0, 4200], 4).map((r) => r.frames), [[0], [4200]]);
 });

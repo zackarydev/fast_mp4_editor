@@ -66,3 +66,22 @@ export function plan(index, frames, spawnCost = SPAWN_COST) {
   for (const r of runs) r.decodes = r.last - r.key + 1;
   return runs;
 }
+
+// A keyframe decodes on its own, so a key pass need not start a process per
+// frame: one told to skip every frame that is not a keyframe reads straight
+// through, at a few ms per keyframe against a process start's hundreds. The
+// frames are split into one contiguous sweep per job; each decodes every
+// keyframe it passes, wanted or not.
+export function sweep(index, frames, jobs) {
+  const sorted = [...new Set(frames)].sort((a, b) => a - b);
+  const n = Math.min(Math.max(1, jobs), sorted.length);
+  const runs = [];
+  for (let k = 0; k < n; k++) {
+    const part = sorted.slice(Math.floor((k * sorted.length) / n), Math.floor(((k + 1) * sorted.length) / n));
+    const last = part[part.length - 1];
+    let decodes = 0;
+    for (let i = part[0]; i <= last; i++) decodes += index.key[i];
+    runs.push({ key: part[0], frames: part, last, decodes, keysOnly: true });
+  }
+  return runs;
+}

@@ -43,11 +43,16 @@ test('the mobile window scales into each pass', () => {
   assert.deepEqual(windowIn(64, 36, source, win), { w: 18, h: 32 });
 });
 
-test('a cut takes the window around the centre, and is pulled inside at the edge', () => {
-  // A 6x2 frame whose red channel is the column number.
-  const rgb = new Uint8Array(6 * 2 * 3);
-  for (let i = 0; i < 12; i++) rgb[i * 3] = i % 6;
-  const reds = (t) => [...t].filter((_, i) => i % 3 === 0);
-  assert.deepEqual(reds(cut(rgb, 6, 2, 3, 1, 2, 2)), [2, 3, 2, 3]);
-  assert.deepEqual(reds(cut(rgb, 6, 2, 6, 1, 2, 2)), [4, 5, 4, 5]);
+test('a cut takes the window as the phone shows it: turned, and black past the frame', () => {
+  // A 32x18 pass of a 4K frame, so one pass pixel is 120 source pixels and a
+  // scale-1 window is 9x16 of them. Red is the column, green is lit everywhere.
+  const frame = { width: 3840, height: 2160 };
+  const rgb = new Uint8Array(32 * 18 * 3);
+  for (let i = 0; i < 32 * 18; i++) rgb.set([i % 32, 255, 0], i * 3);
+  const row = (t) => [...Array(9).keys()].map((i) => t[i * 3]);
+  assert.deepEqual(row(cut(rgb, 32, 18, frame, { cx: 1980, cy: 1080, rot: 0, scale: 1 }, 9, 16)), [12, 13, 14, 15, 16, 17, 18, 19, 20]);
+  assert.deepEqual(row(cut(rgb, 32, 18, frame, { cx: 1980, cy: 1080, rot: 180, scale: 1 }, 9, 16)), [20, 19, 18, 17, 16, 15, 14, 13, 12]);
+  const edge = cut(rgb, 32, 18, frame, { cx: 0, cy: 1080, rot: 0, scale: 1 }, 9, 16);
+  assert.deepEqual([...edge.subarray(0, 3)], [0, 0, 0]);
+  assert.equal(edge[8 * 3 + 1], 255);
 });
