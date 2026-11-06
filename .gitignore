@@ -2,4 +2,7 @@
 *.mp4
 *.png
 
+!readme.png
 out/
+test/
+samples/
